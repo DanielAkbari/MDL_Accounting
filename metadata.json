@@ -1,0 +1,6 @@
+{
+  "name": "MD Finance",
+  "description": "Accounting System for Malang Dreamland with real-time cash flow, profit/loss per business unit, using Google Sheets",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
