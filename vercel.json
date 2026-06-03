@@ -1,7 +1,9 @@
 {
   "version": 2,
   "functions": {
-    "server.ts": {}
+    "server.ts": {
+      "maxDuration": 15
+    }
   },
   "rewrites": [
     {
