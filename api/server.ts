@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { google } from "googleapis";
 
 const app = express();
@@ -245,6 +244,7 @@ app.use(express.json({ limit: "5mb" }));
     async function startLocalServer() {
       // Vite middleware for development
       if (process.env.NODE_ENV !== "production") {
+        const { createServer: createViteServer } = await import("vite");
         const vite = await createViteServer({
           server: { middlewareMode: true },
           appType: "spa",
