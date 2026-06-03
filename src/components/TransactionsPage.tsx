@@ -79,7 +79,7 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
         id: editId || crypto.randomUUID(),
         date: new Date(formData.date).toISOString(),
         type: formData.type,
-        amount: parseFloat(formData.amount),
+        amount: parseFloat(formData.amount.replace(/\./g, '')) || 0,
         unit: formData.unit,
         accountCode: formData.accountCode,
         accountName: formData.accountName,
@@ -123,7 +123,7 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
     setEditId(t.id);
     setFormData({
       type: t.type,
-      amount: t.amount.toString(),
+      amount: t.amount ? Number(t.amount).toLocaleString('id-ID') : '',
       date: t.date ? format(parseISO(t.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
       unit: t.unit || units[0],
       accountCode: t.accountCode || '',
@@ -309,12 +309,16 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Nominal (Rp)</label>
                   <input 
-                    type="number" 
+                    type="text" 
+                    inputMode="numeric"
                     required
-                    min="1"
                     placeholder="0"
                     value={formData.amount}
-                    onChange={e => setFormData({...formData, amount: e.target.value})}
+                    onChange={e => {
+                      const rawVal = e.target.value.replace(/\D/g, '');
+                      const formatted = rawVal ? Number(rawVal).toLocaleString('id-ID') : '';
+                      setFormData({...formData, amount: formatted});
+                    }}
                     className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-bold"
                   />
                 </div>

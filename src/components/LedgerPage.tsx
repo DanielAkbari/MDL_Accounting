@@ -201,7 +201,7 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
     try {
       const debitAccName = coasList.find(c => c.code === debitAccount)?.name || '';
       const creditAccName = coasList.find(c => c.code === creditAccount)?.name || '';
-      const amount = parseFloat(journalAmount);
+      const amount = parseFloat(journalAmount.replace(/\./g, '')) || 0;
       const commonId = crypto.randomUUID();
 
       const txDebit: Transaction = {
@@ -526,12 +526,16 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Nominal (Rp)</label>
                 <input 
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   required
-                  min="1"
                   placeholder="0"
                   value={journalAmount}
-                  onChange={e => setJournalAmount(e.target.value)}
+                  onChange={e => {
+                    const rawVal = e.target.value.replace(/\D/g, '');
+                    const formatted = rawVal ? Number(rawVal).toLocaleString('id-ID') : '';
+                    setJournalAmount(formatted);
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-bold text-sm"
                 />
               </div>
