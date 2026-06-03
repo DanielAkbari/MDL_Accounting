@@ -12,12 +12,17 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
   const coasList = useMemo(() => getMergedCOA(), []);
   
   const availableAccounts = useMemo(() => {
-    const list = [{ code: '1000', name: 'Kas & Bank', type: 'Asset' }];
-    const usedCodes = new Set(transactions.map(t => t.accountCode).filter(Boolean));
+    const list = [{ code: '1000', name: 'Kas & Bank', type: 'BANK' }];
+    const usedCodes = new Set([
+      ...transactions.map(t => t.accountCode).filter(Boolean),
+      ...transactions.map(t => t.accountId).filter(Boolean)
+    ]);
     
     coasList.forEach(coa => {
-      if (usedCodes.has(coa.code)) {
-        list.push({ ...coa });
+      if (coa.type === 'BANK' || usedCodes.has(coa.code)) {
+        if (!list.find(item => item.code === coa.code)) {
+          list.push({ ...coa });
+        }
       }
     });
 
@@ -63,11 +68,20 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
       return ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS', 'DEPR'].includes(coa.type);
     };
 
+    const isBankAccount = (code: string) => {
+      if (code === '1000') return true;
+      const coa = coasList.find(c => c.code === code);
+      return coa?.type === 'BANK';
+    };
+
     const isDebitNormal = isAssetOrExpense(selectedAccount);
 
     const rows = transactions
       .filter(t => {
-        if (selectedAccount === '1000') return true;
+        const bankCode = t.accountId || '1000';
+        if (isBankAccount(selectedAccount)) {
+          return bankCode === selectedAccount;
+        }
         return t.accountCode === selectedAccount;
       })
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
@@ -75,7 +89,8 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         let debit = 0;
         let credit = 0;
 
-        if (selectedAccount === '1000') {
+        const bankCode = t.accountId || '1000';
+        if (selectedAccount === bankCode) {
           if (t.type === 'Income') {
             debit = t.amount;
           } else {
@@ -100,7 +115,7 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
           date: t.date,
           description: t.description || `Transaksi ${t.type === 'Income' ? 'Penerimaan' : 'Pengeluaran'}`,
           unit: t.unit,
-          ref: t.accountCode === selectedAccount ? '1000' : t.accountCode,
+          ref: t.accountCode === selectedAccount ? bankCode : t.accountCode,
           debit,
           credit,
           balance
@@ -125,8 +140,13 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
     balances['1000'] = { debit: 0, credit: 0, normalBalance: 'Debit' };
 
     transactions.forEach(t => {
+      const bankCode = t.accountId || '1000';
+      if (!balances[bankCode]) {
+        balances[bankCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
+      }
+
       if (t.type === 'Income') {
-        balances['1000'].debit += t.amount;
+        balances[bankCode].debit += t.amount;
         if (t.accountCode) {
           if (!balances[t.accountCode]) {
             balances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Credit' };
@@ -134,7 +154,7 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
           balances[t.accountCode].credit += t.amount;
         }
       } else {
-        balances['1000'].credit += t.amount;
+        balances[bankCode].credit += t.amount;
         if (t.accountCode) {
           if (!balances[t.accountCode]) {
             balances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };

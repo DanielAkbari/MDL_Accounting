@@ -38,6 +38,15 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
 
   const incomeAccounts = useMemo(() => coaList.filter(c => ['REVE', 'OINC'].includes(c.type)), [coaList]);
   const expenseAccounts = useMemo(() => coaList.filter(c => ['COGS', 'EXPS', 'OEXP', 'DEPR'].includes(c.type)), [coaList]);
+  const bankAccounts = useMemo(() => {
+    const list = [{ code: '1000', name: 'Kas & Bank', type: 'BANK' }];
+    coaList.forEach(c => {
+      if (c.type === 'BANK' && c.code !== '1000') {
+        list.push(c);
+      }
+    });
+    return list;
+  }, [coaList]);
 
   const [formData, setFormData] = useState({
     type: 'Income' as TransactionType,
@@ -46,7 +55,8 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
     unit: units[0],
     accountCode: incomeAccounts[0]?.code || '',
     accountName: incomeAccounts[0]?.name || '',
-    description: ''
+    description: '',
+    accountId: '1000'
   });
 
   const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{id: string, desc: string} | null>(null);
@@ -59,7 +69,8 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
       unit: units[0],
       accountCode: incomeAccounts[0]?.code || '',
       accountName: incomeAccounts[0]?.name || '',
-      description: ''
+      description: '',
+      accountId: '1000'
     });
     setEditId(null);
   };
@@ -83,7 +94,8 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
         unit: formData.unit,
         accountCode: formData.accountCode,
         accountName: formData.accountName,
-        description: formData.description
+        description: formData.description,
+        accountId: formData.accountId
       };
       
       if (editId) {
@@ -128,7 +140,8 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
       unit: t.unit || units[0],
       accountCode: t.accountCode || '',
       accountName: t.accountName || '',
-      description: t.description || ''
+      description: t.description || '',
+      accountId: t.accountId || '1000'
     });
     setIsModalOpen(true);
   };
@@ -231,6 +244,9 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                       <div className="flex flex-col">
                         <span className="font-bold text-[10px] text-slate-400">{t.accountCode || '-'}</span>
                         <span className="truncate max-w-[150px]">{t.accountName}</span>
+                        <span className="text-[10px] text-blue-500 font-medium mt-0.5 whitespace-nowrap truncate max-w-[150px]">
+                          Bank/Kas: {coaList.find(c => c.code === (t.accountId || '1000'))?.name || 'Kas & Bank'}
+                        </span>
                       </div>
                     </td>
                     <td className="px-4 py-2 text-slate-900 font-medium">{t.description}</td>
@@ -324,7 +340,7 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Unit Usaha</label>
                   <CreatableSelect 
@@ -361,6 +377,22 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                     formatCreateLabel={(inputValue) => `Buat akun CoA "${inputValue}"`}
                     styles={{ control: (base) => ({ ...base, minHeight: '42px', borderRadius: '0.375rem', borderColor: '#cbd5e1' }) }}
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Akun Kas / Bank</label>
+                  <select
+                    required
+                    value={formData.accountId}
+                    onChange={e => setFormData({...formData, accountId: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-medium"
+                    style={{ height: '42px' }}
+                  >
+                    {bankAccounts.map(b => (
+                      <option key={b.code} value={b.code}>
+                        [{b.code}] {b.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

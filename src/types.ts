@@ -9,6 +9,7 @@ export interface Transaction {
   accountCode: string;
   accountName: string;
   description: string;
+  accountId?: string;
 }
 
 export interface BusinessUnit {
