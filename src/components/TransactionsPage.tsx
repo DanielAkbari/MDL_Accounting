@@ -285,7 +285,7 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Catat Transaksi Jurnal</h2>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -340,7 +340,7 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Unit Usaha</label>
                   <CreatableSelect 
@@ -351,30 +351,6 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                     className="text-slate-900 text-sm"
                     placeholder="Pilih atau ketik baru..."
                     formatCreateLabel={(inputValue) => `Tambahkan unit "${inputValue}"`}
-                    styles={{ control: (base) => ({ ...base, minHeight: '42px', borderRadius: '0.375rem', borderColor: '#cbd5e1' }) }}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Akun Perkiraan (CoA)</label>
-                  <CreatableSelect 
-                    isClearable
-                    value={{ value: formData.accountCode, label: formData.accountName ? `[${formData.accountCode}] ${formData.accountName}` : formData.accountCode }}
-                    onChange={(newValue: any) => {
-                      if (newValue) {
-                        const existingAccount = activeAccounts.find(a => a.code === newValue.value);
-                        if (existingAccount) {
-                          setFormData({...formData, accountCode: existingAccount.code, accountName: existingAccount.name});
-                        } else {
-                          setFormData({...formData, accountCode: newValue.value, accountName: newValue.value});
-                        }
-                      } else {
-                        setFormData({...formData, accountCode: '', accountName: ''});
-                      }
-                    }}
-                    options={activeAccounts.map(a => ({ value: a.code, label: `[${a.code}] ${a.name}` }))}
-                    className="text-slate-900 text-sm"
-                    placeholder="Pilih atau ketik akun baru..."
-                    formatCreateLabel={(inputValue) => `Buat akun CoA "${inputValue}"`}
                     styles={{ control: (base) => ({ ...base, minHeight: '42px', borderRadius: '0.375rem', borderColor: '#cbd5e1' }) }}
                   />
                 </div>
@@ -394,6 +370,31 @@ export default function TransactionsPage({ transactions, onRefresh }: { transact
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Akun Perkiraan (CoA)</label>
+                <CreatableSelect 
+                  isClearable
+                  value={{ value: formData.accountCode, label: formData.accountName ? `[${formData.accountCode}] ${formData.accountName}` : formData.accountCode }}
+                  onChange={(newValue: any) => {
+                    if (newValue) {
+                      const existingAccount = activeAccounts.find(a => a.code === newValue.value);
+                      if (existingAccount) {
+                        setFormData({...formData, accountCode: existingAccount.code, accountName: existingAccount.name});
+                      } else {
+                        setFormData({...formData, accountCode: newValue.value, accountName: newValue.value});
+                      }
+                    } else {
+                      setFormData({...formData, accountCode: '', accountName: ''});
+                    }
+                  }}
+                  options={activeAccounts.map(a => ({ value: a.code, label: `[${a.code}] ${a.name}` }))}
+                  className="text-slate-900 text-sm"
+                  placeholder="Pilih atau ketik akun baru..."
+                  formatCreateLabel={(inputValue) => `Buat akun CoA "${inputValue}"`}
+                  styles={{ control: (base) => ({ ...base, minHeight: '42px', borderRadius: '0.375rem', borderColor: '#cbd5e1' }) }}
+                />
               </div>
 
               <div>
