@@ -10,16 +10,50 @@ import toast from 'react-hot-toast';
 export default function LedgerPage({ transactions, onRefresh }: { transactions: Transaction[], onRefresh?: () => void }) {
   const [activeSubTab, setActiveSubTab] = useState<'detail' | 'balances' | 'manual-journal'>('balances');
   const coasList = useMemo(() => getMergedCOA(), []);
+
+  const isDescendantOf = (childCode: string, parentCode: string): boolean => {
+    if (parentCode === '1000') {
+      if (childCode === '1000') return false;
+      const coa = coasList.find(c => c.code === childCode);
+      return coa?.type === 'BANK';
+    }
+    
+    let currentCode = childCode;
+    while (currentCode) {
+      const coa = coasList.find(c => c.code === currentCode);
+      if (coa && coa.parentCode === parentCode) {
+        return true;
+      }
+      currentCode = coa?.parentCode || '';
+    }
+    return false;
+  };
   
   const availableAccounts = useMemo(() => {
     const list = [{ code: '1000', name: 'Kas & Bank', type: 'BANK' }];
-    const usedCodes = new Set([
-      ...transactions.map(t => t.accountCode).filter(Boolean),
-      ...transactions.map(t => t.accountId).filter(Boolean)
-    ]);
+    
+    const usedCodes = new Set<string>();
+    transactions.forEach(t => {
+      if (t.accountCode) usedCodes.add(t.accountCode);
+      if (t.accountId) usedCodes.add(t.accountId);
+    });
+
+    const allActiveCodes = new Set(usedCodes);
+    usedCodes.forEach(code => {
+      let currentCode = code;
+      while (currentCode) {
+        const coa = coasList.find(c => c.code === currentCode);
+        if (coa && coa.parentCode) {
+          allActiveCodes.add(coa.parentCode);
+          currentCode = coa.parentCode;
+        } else {
+          break;
+        }
+      }
+    });
     
     coasList.forEach(coa => {
-      if (coa.type === 'BANK' || usedCodes.has(coa.code)) {
+      if (coa.type === 'BANK' || allActiveCodes.has(coa.code)) {
         if (!list.find(item => item.code === coa.code)) {
           list.push({ ...coa });
         }
@@ -79,10 +113,16 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
     const rows = transactions
       .filter(t => {
         const bankCode = t.accountId || '1000';
+        
+        const matchesSelected = (code: string) => {
+          if (code === selectedAccount) return true;
+          return isDescendantOf(code, selectedAccount);
+        };
+
         if (isBankAccount(selectedAccount)) {
-          return bankCode === selectedAccount;
+          return matchesSelected(bankCode);
         }
-        return t.accountCode === selectedAccount;
+        return matchesSelected(t.accountCode);
       })
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .map(t => {
@@ -90,17 +130,23 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         let credit = 0;
 
         const bankCode = t.accountId || '1000';
-        if (selectedAccount === bankCode) {
-          if (t.type === 'Income') {
-            debit = t.amount;
-          } else {
-            credit = t.amount;
+        if (isBankAccount(selectedAccount)) {
+          const isAffected = selectedAccount === bankCode || isDescendantOf(bankCode, selectedAccount);
+          if (isAffected) {
+            if (t.type === 'Income') {
+              debit = t.amount;
+            } else {
+              credit = t.amount;
+            }
           }
         } else {
-          if (t.type === 'Income') {
-            credit = t.amount;
-          } else {
-            debit = t.amount;
+          const isAffected = selectedAccount === t.accountCode || isDescendantOf(t.accountCode, selectedAccount);
+          if (isAffected) {
+            if (t.type === 'Income') {
+              credit = t.amount;
+            } else {
+              debit = t.amount;
+            }
           }
         }
 
@@ -127,44 +173,60 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
 
   // Tab 2: Account Balances Calculation
   const accountBalances = useMemo(() => {
-    const balances: Record<string, { debit: number; credit: number; normalBalance: 'Debit' | 'Credit' }> = {};
+    const directBalances: Record<string, { debit: number; credit: number; normalBalance: 'Debit' | 'Credit' }> = {};
 
     coasList.forEach(coa => {
-      balances[coa.code] = {
+      directBalances[coa.code] = {
         debit: 0,
         credit: 0,
         normalBalance: ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS', 'DEPR'].includes(coa.type) ? 'Debit' : 'Credit'
       };
     });
 
-    balances['1000'] = { debit: 0, credit: 0, normalBalance: 'Debit' };
+    directBalances['1000'] = { debit: 0, credit: 0, normalBalance: 'Debit' };
 
     transactions.forEach(t => {
       const bankCode = t.accountId || '1000';
-      if (!balances[bankCode]) {
-        balances[bankCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
+      if (!directBalances[bankCode]) {
+        directBalances[bankCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
       }
 
       if (t.type === 'Income') {
-        balances[bankCode].debit += t.amount;
+        directBalances[bankCode].debit += t.amount;
         if (t.accountCode) {
-          if (!balances[t.accountCode]) {
-            balances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Credit' };
+          if (!directBalances[t.accountCode]) {
+            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Credit' };
           }
-          balances[t.accountCode].credit += t.amount;
+          directBalances[t.accountCode].credit += t.amount;
         }
       } else {
-        balances[bankCode].credit += t.amount;
+        directBalances[bankCode].credit += t.amount;
         if (t.accountCode) {
-          if (!balances[t.accountCode]) {
-            balances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
+          if (!directBalances[t.accountCode]) {
+            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
           }
-          balances[t.accountCode].debit += t.amount;
+          directBalances[t.accountCode].debit += t.amount;
         }
       }
     });
 
-    const list = Object.entries(balances).map(([code, b]) => {
+    // Rollup child accounts' direct balances to their parent accounts
+    const aggregatedBalances: Record<string, { debit: number; credit: number; normalBalance: 'Debit' | 'Credit' }> = {};
+    
+    Object.keys(directBalances).forEach(code => {
+      aggregatedBalances[code] = { ...directBalances[code] };
+    });
+
+    Object.keys(aggregatedBalances).forEach(parentCode => {
+      Object.keys(directBalances).forEach(childCode => {
+        if (childCode !== parentCode && isDescendantOf(childCode, parentCode)) {
+          aggregatedBalances[parentCode].debit += directBalances[childCode].debit;
+          aggregatedBalances[parentCode].credit += directBalances[childCode].credit;
+        }
+      });
+    });
+
+    const list = Object.entries(aggregatedBalances).map(([code, b]) => {
       const isDebitNormal = b.normalBalance === 'Debit';
       let balanceValue = 0;
       if (isDebitNormal) {
