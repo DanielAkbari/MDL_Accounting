@@ -1,53 +1,20 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+import { Router, Request, Response } from "express";
+import { GoogleGenAI } from "@google/genai";
 
-// api/server.ts
-var server_exports = {};
-__export(server_exports, {
-  default: () => server_default
-});
-module.exports = __toCommonJS(server_exports);
-var import_dotenv = __toESM(require("dotenv"), 1);
-var import_path = __toESM(require("path"), 1);
-var import_express2 = __toESM(require("express"), 1);
+const router = Router();
 
-// api/ai.ts
-var import_express = require("express");
-var import_genai = require("@google/genai");
-var router = (0, import_express.Router)();
-var getGeminiClient = () => {
+// Inisialisasi Google Gen AI Client
+// Gemini SDK akan otomatis membaca GEMINI_API_KEY dari process.env jika tidak dikirim dalam opsi
+const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return null;
   }
-  return new import_genai.GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey });
 };
-var CHAT_SYSTEM_INSTRUCTION = `
+
+// System Instruction untuk Chat Keuangan Cerdas
+const CHAT_SYSTEM_INSTRUCTION = `
 Anda adalah FintraxAI, asisten keuangan dan akuntansi pintar untuk aplikasi Fintrax.
 Tugas Anda adalah membantu menganalisis data keuangan, transaksi, dan memberikan saran akuntansi yang relevan berdasarkan data yang disediakan.
 
@@ -60,22 +27,28 @@ ATURAN KEAMANAN DAN PEMBATASAN PERAN YANG SANGAT KETAT:
 
 DATA KEUANGAN PERUSAHAAN (KONTEKS):
 (Data transaksi diringkas agar hemat token, disematkan pada pesan awal dari sistem)`;
-function summarizeTransactions(transactions) {
+
+// Mengkompresi daftar transaksi menjadi ringkasan yang ramah token
+function summarizeTransactions(transactions: any[]) {
   if (!transactions || transactions.length === 0) {
     return "Tidak ada data transaksi yang tercatat.";
   }
+
   let totalIncome = 0;
   let totalExpense = 0;
-  const projectIncome = {};
-  const projectExpense = {};
-  const categorySummary = {};
+  const projectIncome: Record<string, number> = {};
+  const projectExpense: Record<string, number> = {};
+  const categorySummary: Record<string, { income: number; expense: number }> = {};
+
   transactions.forEach((tx) => {
     const amount = Number(tx.amount) || 0;
     const project = tx.project || "Umum";
     const coaName = tx.accountName || "Tanpa Nama Akun";
+
     if (!categorySummary[coaName]) {
       categorySummary[coaName] = { income: 0, expense: 0 };
     }
+
     if (tx.type === "Income") {
       totalIncome += amount;
       projectIncome[project] = (projectIncome[project] || 0) + amount;
@@ -86,16 +59,26 @@ function summarizeTransactions(transactions) {
       categorySummary[coaName].expense += amount;
     }
   });
-  const topCategories = Object.entries(categorySummary).map(([name, val]) => ({ name, ...val })).sort((a, b) => b.income + b.expense - (a.income + a.expense)).slice(0, 12);
-  const lastTransactions = transactions.slice(-40).map((t) => ({
-    date: t.date ? t.date.split("T")[0] : "-",
-    type: t.type,
-    amount: t.amount,
-    unit: t.unit,
-    coa: `${t.accountCode} - ${t.accountName}`,
-    desc: t.description,
-    project: t.project
-  }));
+
+  // Urutkan kategori transaksi terpopuler (ambil 12 teratas)
+  const topCategories = Object.entries(categorySummary)
+    .map(([name, val]) => ({ name, ...val }))
+    .sort((a, b) => (b.income + b.expense) - (a.income + a.expense))
+    .slice(0, 12);
+
+  // Ambil maksimal 40 transaksi terbaru saja untuk detail mentah
+  const lastTransactions = transactions
+    .slice(-40)
+    .map((t) => ({
+      date: t.date ? t.date.split("T")[0] : "-",
+      type: t.type,
+      amount: t.amount,
+      unit: t.unit,
+      coa: `${t.accountCode} - ${t.accountName}`,
+      desc: t.description,
+      project: t.project,
+    }));
+
   return JSON.stringify({
     ringkasan_umum: {
       total_pemasukan: totalIncome,
@@ -103,24 +86,30 @@ function summarizeTransactions(transactions) {
       laba_rugi_bersih: totalIncome - totalExpense,
       breakdown_proyek: {
         pemasukan: projectIncome,
-        pengeluaran: projectExpense
+        pengeluaran: projectExpense,
       },
-      kategori_utama: topCategories
+      kategori_utama: topCategories,
     },
-    transaksi_terbaru: lastTransactions
+    transaksi_terbaru: lastTransactions,
   });
 }
-router.post("/chat", async (req, res) => {
+
+// Handler POST /api/ai/chat
+router.post("/chat", async (req: Request, res: Response): Promise<void> => {
   try {
     const { message, history, transactions, coaList } = req.body;
+
     if (!message) {
       res.status(400).json({ error: "Pesan tidak boleh kosong" });
       return;
     }
+
+    // Limit input length
     if (message.length > 800) {
       res.status(400).json({ error: "Pesan terlalu panjang. Batas maksimal adalah 800 karakter." });
       return;
     }
+
     const ai = getGeminiClient();
     if (!ai) {
       res.status(503).json({
@@ -128,9 +117,21 @@ router.post("/chat", async (req, res) => {
       });
       return;
     }
+
+    // Bangun data konteks transaksi
     const financialSummaryText = summarizeTransactions(transactions || []);
-    const summarizedCoas = (coaList || []).map((c) => `${c.code}: ${c.name} (${c.type}) [Proyek: ${c.project || "Umum"}]`).slice(0, 100).join("\n");
-    const contents = [];
+    
+    // Bangun daftar CoA ringkas
+    const summarizedCoas = (coaList || [])
+      .map((c: any) => `${c.code}: ${c.name} (${c.type}) [Proyek: ${c.project || 'Umum'}]`)
+      .slice(0, 100)
+      .join("\n");
+
+    // Format chat history ke format Gemini SDK: { role: 'user' | 'model', parts: [{ text: string }] }
+    // Di Gemini SDK baru, formatnya adalah `contents`
+    const contents: any[] = [];
+
+    // Sisipkan instruksi konteks di awal percakapan sebagai role 'user' agar model memahami datanya
     contents.push({
       role: "user",
       parts: [
@@ -146,6 +147,8 @@ Tolong simpan data di atas dalam ingatan Anda. Jawab pertanyaan pengguna berikut
         }
       ]
     });
+
+    // Model merespons pemahaman data awal
     contents.push({
       role: "model",
       parts: [
@@ -154,8 +157,11 @@ Tolong simpan data di atas dalam ingatan Anda. Jawab pertanyaan pengguna berikut
         }
       ]
     });
+
+    // Sisipkan history percakapan sebelumnya
     if (Array.isArray(history)) {
-      history.forEach((h) => {
+      history.forEach((h: any) => {
+        // Hanya masukkan pesan yang bukan system injection awal
         if (h.role && h.text) {
           contents.push({
             role: h.role === "user" ? "user" : "model",
@@ -164,33 +170,40 @@ Tolong simpan data di atas dalam ingatan Anda. Jawab pertanyaan pengguna berikut
         }
       });
     }
+
+    // Masukkan pesan aktif pengguna
     contents.push({
       role: "user",
       parts: [{ text: message }]
     });
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents,
+      contents: contents,
       config: {
         systemInstruction: CHAT_SYSTEM_INSTRUCTION,
         maxOutputTokens: 800,
-        temperature: 0.3
-        // Menjaga agar AI tetap faktual dan konsisten
+        temperature: 0.3, // Menjaga agar AI tetap faktual dan konsisten
       }
     });
+
     res.json({ text: response.text });
-  } catch (error) {
+  } catch (error: any) {
     console.error("FintraxAI Chat error:", error);
     res.status(500).json({ error: "Terjadi kesalahan internal AI: " + (error.message || error) });
   }
 });
-router.post("/suggest-coa", async (req, res) => {
+
+// Handler POST /api/ai/suggest-coa
+router.post("/suggest-coa", async (req: Request, res: Response): Promise<void> => {
   try {
     const { description, type, project, coaList } = req.body;
+
     if (!description || !type || !project) {
       res.status(400).json({ error: "Parameter description, type, dan project wajib diisi." });
       return;
     }
+
     const ai = getGeminiClient();
     if (!ai) {
       res.status(503).json({
@@ -198,8 +211,15 @@ router.post("/suggest-coa", async (req, res) => {
       });
       return;
     }
-    const filteredCoas = (coaList || []).filter((c) => c.project === project || c.project === "Umum" || c.project === "Konsolidasi");
-    const coaListText = filteredCoas.map((c) => `KODE: ${c.code} | NAMA: ${c.name} | TIPE: ${c.type} | PROYEK: ${c.project}`).join("\n");
+
+    // Ringkas daftar CoA untuk dicocokkan
+    // Kita filter agar hanya CoA yang relevan dengan tipe proyek atau Umum
+    const filteredCoas = (coaList || []).filter((c: any) => c.project === project || c.project === "Umum" || c.project === "Konsolidasi");
+    
+    const coaListText = filteredCoas
+      .map((c: any) => `KODE: ${c.code} | NAMA: ${c.name} | TIPE: ${c.type} | PROYEK: ${c.project}`)
+      .join("\n");
+
     const prompt = `
 Analisis deskripsi transaksi berikut dan tentukan akun perkiraan (CoA) yang paling cocok dari daftar akun yang disediakan.
 
@@ -217,6 +237,7 @@ INSTRUKSI PENTING:
 3. Jika tipe transaksi adalah 'Expense', pilih akun perkiraan berkategori beban/biaya (tipe COGS, EXPS, OEXP, atau DEPR).
 4. Tentukan juga Akun Kas/Bank (tipe BANK) yang paling cocok sebagai sumber atau tujuan dana berdasarkan konteks deskripsi dan nama proyek (misal: BCA Pariwisata untuk pariwisata, BCA Properti untuk properti, Kas Kasir untuk transaksi kecil tunai, atau default Kas & Bank [11000]).
 5. Kembalikan respons dalam format JSON yang valid dan terstruktur sesuai skema berikut.`;
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
@@ -237,117 +258,17 @@ INSTRUKSI PENTING:
         temperature: 0.1
       }
     });
+
     if (!response.text) {
       throw new Error("Gemini returned empty response");
     }
+
     const suggestion = JSON.parse(response.text.trim());
     res.json(suggestion);
-  } catch (error) {
+  } catch (error: any) {
     console.error("FintraxAI Suggest CoA error:", error);
     res.status(500).json({ error: "Gagal memproses saran CoA: " + (error.message || error) });
   }
 });
-var ai_default = router;
 
-// api/server.ts
-var import_https = __toESM(require("https"), 1);
-import_dotenv.default.config({ path: import_path.default.resolve(process.cwd(), ".env.local") });
-import_dotenv.default.config();
-var app = (0, import_express2.default)();
-var PORT = Number(process.env.PORT) || 3e3;
-app.use(import_express2.default.json({ limit: "5mb" }));
-var ipLimits = /* @__PURE__ */ new Map();
-var rateLimiter = (maxRequests, windowMs) => {
-  return (req, res, next) => {
-    const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-    const now = Date.now();
-    let record = ipLimits.get(ip);
-    if (!record || now > record.resetTime) {
-      record = { count: 1, resetTime: now + windowMs };
-      ipLimits.set(ip, record);
-      next();
-    } else {
-      record.count++;
-      if (record.count > maxRequests) {
-        res.status(429).json({
-          error: "Terlalu banyak permintaan. Silakan tunggu beberapa saat lagi."
-        });
-        return;
-      }
-      next();
-    }
-  };
-};
-app.use("/api/ai", rateLimiter(20, 6e4), ai_default);
-app.all("/api/supabase-proxy/*splat", rateLimiter(100, 6e4), (req, res) => {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
-  if (!supabaseUrl) {
-    res.status(500).json({ error: "Supabase URL is not configured on the server" });
-    return;
-  }
-  const path2 = req.originalUrl.replace("/api/supabase-proxy", "");
-  const targetUrl = `${supabaseUrl}${path2}`;
-  const parsedUrl = new URL(targetUrl);
-  const headers = {};
-  const allowedHeaders = ["apikey", "authorization", "content-type", "prefer", "range", "x-client-info", "user-agent"];
-  for (const name of allowedHeaders) {
-    const value = req.headers[name];
-    if (typeof value === "string") {
-      headers[name] = value;
-    }
-  }
-  headers["accept"] = "application/json, text/plain, */*";
-  const bodyData = req.method !== "GET" && req.method !== "HEAD" && req.body ? typeof req.body === "string" ? req.body : JSON.stringify(req.body) : null;
-  if (bodyData) {
-    headers["content-length"] = Buffer.byteLength(bodyData).toString();
-  }
-  const options = {
-    method: req.method,
-    hostname: parsedUrl.hostname,
-    path: parsedUrl.pathname + parsedUrl.search,
-    headers
-  };
-  console.log(`[Proxy https] ${req.method} -> ${targetUrl}`);
-  const proxyReq = import_https.default.request(options, (proxyRes) => {
-    res.statusCode = proxyRes.statusCode || 500;
-    for (const [key, value] of Object.entries(proxyRes.headers)) {
-      const lowerKey = key.toLowerCase();
-      if (lowerKey !== "content-encoding" && lowerKey !== "transfer-encoding" && lowerKey !== "content-length" && value) {
-        res.setHeader(key, value);
-      }
-    }
-    proxyRes.pipe(res);
-  });
-  proxyReq.on("error", (err) => {
-    console.error("Proxy https request error:", err);
-    res.status(500).json({ error: err.message || "Internal server error during proxying" });
-  });
-  if (bodyData) {
-    proxyReq.write(bodyData);
-  }
-  proxyReq.end();
-});
-if (!process.env.VERCEL) {
-  async function startLocalServer() {
-    if (process.env.NODE_ENV !== "production") {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa"
-      });
-      app.use(vite.middlewares);
-    } else {
-      const distPath = import_path.default.join(process.cwd(), "dist");
-      app.use(import_express2.default.static(distPath));
-      app.get("*", (req, res) => {
-        res.sendFile(import_path.default.join(distPath, "index.html"));
-      });
-    }
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
-  startLocalServer();
-}
-var server_default = app;
-//# sourceMappingURL=server.cjs.map
+export default router;

@@ -1,21 +1,37 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction } from '../types';
-import { getMergedCOA } from '../data/coa';
+import { Transaction, BusinessUnit } from '../types';
+import { COA, getCoaProject } from '../data/coa';
 import { formatRp, exportToExcel, exportToPDF } from '../lib/export';
 import { Download, BookOpen, Scale, FileEdit, Plus, Trash2, Loader2 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
 import { addTransaction } from '../lib/apiDb';
 import toast from 'react-hot-toast';
+import { formatSafeDate, parseSafeDate } from '../lib/utils';
 
-export default function LedgerPage({ transactions, onRefresh }: { transactions: Transaction[], onRefresh?: () => void }) {
+export default function LedgerPage({ 
+  transactions, 
+  coaList,
+  onRefresh,
+  currentProject,
+  onProjectChange,
+  allUnits
+}: { 
+  transactions: Transaction[]; 
+  coaList: COA[];
+  onRefresh?: () => void;
+  currentProject?: 'Pariwisata' | 'Properti' | 'Konsolidasi';
+  onProjectChange?: (project: 'Pariwisata' | 'Properti' | 'Konsolidasi') => void;
+  allUnits: BusinessUnit[];
+}) {
   const [activeSubTab, setActiveSubTab] = useState<'detail' | 'balances' | 'manual-journal'>('balances');
-  const coasList = useMemo(() => getMergedCOA(), []);
+  const [detailPage, setDetailPage] = useState(1);
+  const [journalPage, setJournalPage] = useState(1);
+  const coasList = coaList;
 
   const isDescendantOf = (childCode: string, parentCode: string): boolean => {
-    if (parentCode === '1000') {
-      if (childCode === '1000') return false;
+    if (parentCode === '11000') {
+      if (childCode === '11000') return false;
       const coa = coasList.find(c => c.code === childCode);
-      return coa?.type === 'BANK';
+      return coa?.type === 'BANK' || coa?.parentCode === '11000';
     }
     
     let currentCode = childCode;
@@ -30,7 +46,7 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
   };
   
   const availableAccounts = useMemo(() => {
-    const list = [{ code: '1000', name: 'Kas & Bank', type: 'BANK' }];
+    const list: any[] = [];
     
     const usedCodes = new Set<string>();
     transactions.forEach(t => {
@@ -63,47 +79,55 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
     return list.sort((a, b) => a.code.localeCompare(b.code));
   }, [coasList, transactions]);
 
-  const [selectedAccount, setSelectedAccount] = useState<string>('1000');
+  const [selectedAccount, setSelectedAccount] = useState<string>('11000');
 
-  // Units list
-  const units = [
-    'Glamping',
-    'Cabin',
-    'Malang Dreamcamp',
-    'Villa',
-    'Foodcourt',
-    'Wahana - ATV',
-    'Wahana - Ayunan',
-    'Wahana - Keranjang Sultan',
-    'Wahana - Skuter',
-    'Wahana - Seluncuran',
-    'Wahana - spot foto / paralayang',
-    'Wahana - Lainnya',
-    'Umum / Lainnya'
-  ];
+  // Dynamic Units list matching project context
+  const units = useMemo(() => {
+    return (allUnits || [])
+      .filter(u => {
+        if (currentProject && currentProject !== 'Konsolidasi' && u.project !== currentProject) return false;
+        return true;
+      })
+      .map(u => u.name);
+  }, [currentProject, allUnits]);
+
+  // Project-specific custom CoA filtering
+  const filteredCoasList = useMemo(() => {
+    return coasList.filter(c => {
+      if (currentProject && currentProject !== 'Konsolidasi' && c.project && c.project !== currentProject && c.project !== 'Umum') return false;
+      return true;
+    });
+  }, [coasList, currentProject]);
 
   // Manual Journal Form State
-  const [journalDate, setJournalDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [journalDate, setJournalDate] = useState(formatSafeDate(new Date(), 'yyyy-MM-dd'));
   const [journalMemo, setJournalMemo] = useState('');
-  const [journalUnit, setJournalUnit] = useState(units[0]);
+  const [journalUnit, setJournalUnit] = useState('');
   const [debitAccount, setDebitAccount] = useState('');
   const [creditAccount, setCreditAccount] = useState('');
   const [journalAmount, setJournalAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Sync active unit selection on project context switch
+  React.useEffect(() => {
+    if (units.length > 0 && !units.includes(journalUnit)) {
+      setJournalUnit(units[0]);
+    }
+  }, [units, journalUnit]);
 
   // Tab 1: Ledger calculation
   const ledgerData = useMemo(() => {
     let balance = 0;
     
     const isAssetOrExpense = (code: string) => {
-      if (code === '1000') return true;
+      if (code === '11000') return true;
       const coa = coasList.find(c => c.code === code);
       if (!coa) return true;
-      return ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS', 'DEPR'].includes(coa.type);
+      return ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS'].includes(coa.type);
     };
 
     const isBankAccount = (code: string) => {
-      if (code === '1000') return true;
+      if (code === '11000') return true;
       const coa = coasList.find(c => c.code === code);
       return coa?.type === 'BANK';
     };
@@ -112,7 +136,15 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
 
     const rows = transactions
       .filter(t => {
-        const bankCode = t.accountId || '1000';
+        const isManualJournal = t.id.startsWith('JU-') || t.description.startsWith('[Jurnal Umum]');
+        
+        if (isManualJournal) {
+          // Jurnal Umum: matches if t.accountCode is selectedAccount or a descendant
+          return t.accountCode === selectedAccount || isDescendantOf(t.accountCode, selectedAccount);
+        }
+        
+        // Regular transaction: matches if t.accountId matches selectedAccount OR t.accountCode matches selectedAccount
+        const bankCode = t.accountId || '11000';
         
         const matchesSelected = (code: string) => {
           if (code === selectedAccount) return true;
@@ -126,28 +158,47 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
       })
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .map(t => {
+        const isManualJournal = t.id.startsWith('JU-') || t.description.startsWith('[Jurnal Umum]');
+        
         let debit = 0;
         let credit = 0;
+        let ref = '';
 
-        const bankCode = t.accountId || '1000';
-        if (isBankAccount(selectedAccount)) {
-          const isAffected = selectedAccount === bankCode || isDescendantOf(bankCode, selectedAccount);
-          if (isAffected) {
-            if (t.type === 'Income') {
-              debit = t.amount;
-            } else {
-              credit = t.amount;
-            }
+        if (isManualJournal) {
+          if (t.type === 'Expense') { // JU-D (Debit)
+            debit = t.amount;
+          } else { // JU-K (Credit)
+            credit = t.amount;
           }
+          
+          // Opposing ref account: find the other leg of the same journal entry
+          const isDebit = t.type === 'Expense';
+          const matchPrefix = isDebit ? t.id.replace('JU-D-', 'JU-K-') : t.id.replace('JU-K-', 'JU-D-');
+          const otherLine = transactions.find(ot => ot.id === matchPrefix);
+          ref = otherLine ? otherLine.accountCode : '';
         } else {
-          const isAffected = selectedAccount === t.accountCode || isDescendantOf(t.accountCode, selectedAccount);
-          if (isAffected) {
-            if (t.type === 'Income') {
-              credit = t.amount;
-            } else {
-              debit = t.amount;
+          // Regular transactions:
+          const bankCode = t.accountId || '11000';
+          if (isBankAccount(selectedAccount)) {
+            const isAffected = selectedAccount === bankCode || isDescendantOf(bankCode, selectedAccount);
+            if (isAffected) {
+              if (t.type === 'Income') {
+                debit = t.amount;
+              } else {
+                credit = t.amount;
+              }
+            }
+          } else {
+            const isAffected = selectedAccount === t.accountCode || isDescendantOf(t.accountCode, selectedAccount);
+            if (isAffected) {
+              if (t.type === 'Income') {
+                credit = t.amount;
+              } else {
+                debit = t.amount;
+              }
             }
           }
+          ref = t.accountCode === selectedAccount ? bankCode : t.accountCode;
         }
 
         if (isDebitNormal) {
@@ -159,9 +210,9 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         return {
           id: t.id,
           date: t.date,
-          description: t.description || `Transaksi ${t.type === 'Income' ? 'Penerimaan' : 'Pengeluaran'}`,
+          description: isManualJournal ? t.description.replace('[Jurnal Umum] ', '') : (t.description || `Transaksi ${t.type === 'Income' ? 'Penerimaan' : 'Pengeluaran'}`),
           unit: t.unit,
-          ref: t.accountCode === selectedAccount ? bankCode : t.accountCode,
+          ref,
           debit,
           credit,
           balance
@@ -179,14 +230,33 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
       directBalances[coa.code] = {
         debit: 0,
         credit: 0,
-        normalBalance: ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS', 'DEPR'].includes(coa.type) ? 'Debit' : 'Credit'
+        normalBalance: ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS'].includes(coa.type) ? 'Debit' : 'Credit'
       };
     });
 
-    directBalances['1000'] = { debit: 0, credit: 0, normalBalance: 'Debit' };
+    directBalances['11000'] = { debit: 0, credit: 0, normalBalance: 'Debit' };
 
     transactions.forEach(t => {
-      const bankCode = t.accountId || '1000';
+      const isManualJournal = t.id.startsWith('JU-') || t.description.startsWith('[Jurnal Umum]');
+
+      if (isManualJournal) {
+        if (t.accountCode) {
+          if (!directBalances[t.accountCode]) {
+            const coa = coasList.find(c => c.code === t.accountCode);
+            const isDebitNormal = coa ? ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS'].includes(coa.type) : true;
+            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: isDebitNormal ? 'Debit' : 'Credit' };
+          }
+          if (t.type === 'Expense') { // JU-D (Debit)
+            directBalances[t.accountCode].debit += t.amount;
+          } else { // JU-K (Credit)
+            directBalances[t.accountCode].credit += t.amount;
+          }
+        }
+        return;
+      }
+
+      // Regular transactions:
+      const bankCode = t.accountId || '11000';
       if (!directBalances[bankCode]) {
         directBalances[bankCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
       }
@@ -195,7 +265,9 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         directBalances[bankCode].debit += t.amount;
         if (t.accountCode) {
           if (!directBalances[t.accountCode]) {
-            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Credit' };
+            const coa = coasList.find(c => c.code === t.accountCode);
+            const isDebitNormal = coa ? ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS'].includes(coa.type) : false;
+            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: isDebitNormal ? 'Debit' : 'Credit' };
           }
           directBalances[t.accountCode].credit += t.amount;
         }
@@ -203,7 +275,9 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         directBalances[bankCode].credit += t.amount;
         if (t.accountCode) {
           if (!directBalances[t.accountCode]) {
-            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: 'Debit' };
+            const coa = coasList.find(c => c.code === t.accountCode);
+            const isDebitNormal = coa ? ['Asset', 'FASS', 'OASS', 'BANK', 'EXPS', 'OEXP', 'COGS'].includes(coa.type) : true;
+            directBalances[t.accountCode] = { debit: 0, credit: 0, normalBalance: isDebitNormal ? 'Debit' : 'Credit' };
           }
           directBalances[t.accountCode].debit += t.amount;
         }
@@ -235,10 +309,12 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         balanceValue = b.credit - b.debit;
       }
 
+      const coaInfo = coasList.find(c => c.code === code);
       return {
         code,
-        name: code === '1000' ? 'Kas & Bank' : (coasList.find(c => c.code === code)?.name || 'Akun Kustom'),
-        type: code === '1000' ? 'Asset' : (coasList.find(c => c.code === code)?.type || 'Custom'),
+        name: coaInfo?.name || (code === '11000' ? 'Kas & Bank' : 'Akun Kustom'),
+        type: coaInfo?.type || (code === '11000' ? 'Asset' : 'Custom'),
+        parentCode: coaInfo?.parentCode,
         debit: b.debit,
         credit: b.credit,
         balance: balanceValue
@@ -268,6 +344,22 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
       });
   }, [transactions]);
 
+  const paginatedLedgerData = useMemo(() => {
+    return ledgerData.slice((detailPage - 1) * 20, detailPage * 20);
+  }, [ledgerData, detailPage]);
+
+  const paginatedJournalHistory = useMemo(() => {
+    return manualJournalHistory.slice((journalPage - 1) * 20, journalPage * 20);
+  }, [manualJournalHistory, journalPage]);
+
+  React.useEffect(() => {
+    setDetailPage(1);
+  }, [selectedAccount]);
+
+  React.useEffect(() => {
+    setJournalPage(1);
+  }, [activeSubTab]);
+
   const handleSaveManualJournal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!debitAccount || !creditAccount || !journalAmount || !journalMemo) {
@@ -286,6 +378,7 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
       const amount = parseFloat(journalAmount.replace(/\./g, '')) || 0;
       const commonId = crypto.randomUUID();
 
+      const projDebit = getCoaProject(debitAccount, debitAccName);
       const txDebit: Transaction = {
         id: `JU-D-${commonId}`,
         date: new Date(journalDate).toISOString(),
@@ -294,9 +387,11 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         unit: journalUnit,
         accountCode: debitAccount,
         accountName: debitAccName,
-        description: `[Jurnal Umum] ${journalMemo}`
+        description: `[Jurnal Umum] ${journalMemo}`,
+        project: projDebit === 'Umum' ? undefined : (projDebit as 'Pariwisata' | 'Properti')
       };
 
+      const projCredit = getCoaProject(creditAccount, creditAccName);
       const txCredit: Transaction = {
         id: `JU-K-${commonId}`,
         date: new Date(journalDate).toISOString(),
@@ -305,7 +400,8 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
         unit: journalUnit,
         accountCode: creditAccount,
         accountName: creditAccName,
-        description: `[Jurnal Umum] ${journalMemo}`
+        description: `[Jurnal Umum] ${journalMemo}`,
+        project: projCredit === 'Umum' ? undefined : (projCredit as 'Pariwisata' | 'Properti')
       };
 
       await addTransaction(txDebit);
@@ -329,9 +425,9 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
   const handleExportPDF = () => {
     const accountName = availableAccounts.find(a => a.code === selectedAccount)?.name || '';
     const title = `Buku Besar - [${selectedAccount}] ${accountName}`;
-    const headers = ['Tanggal', 'Ref', 'Keterangan', 'Unit', 'Debet', 'Kredit', 'Saldo'];
+    const headers = ['Tanggal', 'Ref', 'Keterangan', 'Barang & Jasa', 'Debet', 'Kredit', 'Saldo'];
     const rows = ledgerData.map(r => [
-      r.date ? format(parseISO(r.date), 'dd/MM/yyyy') : '-', 
+      formatSafeDate(r.date, 'dd/MM/yyyy'), 
       r.ref || '-', 
       r.description, 
       r.unit, 
@@ -346,7 +442,7 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
     const accountName = availableAccounts.find(a => a.code === selectedAccount)?.name || '';
     const title = `Buku Besar - ${selectedAccount}`;
     const data = ledgerData.map(r => ({
-      Tanggal: r.date ? format(parseISO(r.date), 'dd/MM/yyyy') : '-',
+      Tanggal: formatSafeDate(r.date, 'dd/MM/yyyy'),
       Ref: r.ref || '-',
       Keterangan: r.description,
       Unit: r.unit,
@@ -368,6 +464,25 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      {/* Project selector dropdown (ledger-local) */}
+      {currentProject && onProjectChange && (
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="text-left">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Pilih Proyek Buku Besar</h3>
+            <p className="text-[10px] text-slate-400 font-medium">Saring data buku besar berdasarkan proyek aktif</p>
+          </div>
+          <select
+            value={currentProject}
+            onChange={(e) => onProjectChange(e.target.value as any)}
+            className="w-full sm:w-64 bg-slate-50 border border-slate-300 text-slate-800 py-1.5 px-3 rounded-lg font-bold outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs"
+          >
+            <option value="Konsolidasi">📂 Buku Besar Konsolidasi (Semua)</option>
+            <option value="Pariwisata">🌴 Buku Besar Pariwisata</option>
+            <option value="Properti">🏡 Buku Besar Properti</option>
+          </select>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex justify-between items-end">
         <div>
@@ -413,8 +528,12 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                 className="w-full px-3 py-2 border border-slate-300 rounded font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none text-slate-900"
               >
                 {availableAccounts.map(a => (
-                  <option key={a.code} value={a.code}>
-                    [{a.code}] {a.name}
+                  <option 
+                    key={a.code} 
+                    value={a.code}
+                    className={a.parentCode ? "text-slate-600 pl-4 font-normal" : "font-bold text-slate-900 bg-slate-100"}
+                  >
+                    {a.parentCode ? `\u00A0\u00A0\u00A0\u00A0└─ [${a.code}] ${a.name}` : `[${a.code}] ${a.name}`}
                   </option>
                 ))}
               </select>
@@ -450,22 +569,22 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                   <th className="px-4 py-3 border-r border-slate-100">Tanggal</th>
                   <th className="px-4 py-3 border-r border-slate-100">Ref</th>
                   <th className="px-4 py-3 border-r border-slate-100">Keterangan</th>
-                  <th className="px-4 py-3 border-r border-slate-100">Unit</th>
+                  <th className="px-4 py-3 border-r border-slate-100">Barang & Jasa</th>
                   <th className="px-4 py-3 text-right border-r border-slate-100">Debet</th>
                   <th className="px-4 py-3 text-right border-r border-slate-100">Kredit</th>
                   <th className="px-4 py-3 text-right font-black text-slate-800">Saldo</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {ledgerData.length === 0 ? (
+                {paginatedLedgerData.length === 0 ? (
                   <tr>
                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400 text-sm font-medium">Buku besar kosong untuk akun tersebut.</td>
                   </tr>
                 ) : (
-                  ledgerData.map((row, i) => (
+                  paginatedLedgerData.map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-2 border-r border-slate-100 whitespace-nowrap text-slate-700">
-                        {row.date ? format(parseISO(row.date), 'dd MMM yyyy') : '-'}
+                        {formatSafeDate(row.date, 'dd MMM yyyy')}
                       </td>
                       <td className="px-4 py-2 border-r border-slate-100 font-mono text-xs text-slate-500">{row.ref || '-'}</td>
                       <td className="px-4 py-2 border-r border-slate-100 text-slate-700 max-w-xs truncate">{row.description}</td>
@@ -484,6 +603,27 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                 )}
               </tbody>
             </table>
+            {ledgerData.length > 20 && (
+              <div className="flex justify-between items-center p-4 bg-slate-50 border-t border-slate-200 text-xs">
+                <button
+                  onClick={() => setDetailPage(prev => Math.max(prev - 1, 1))}
+                  disabled={detailPage === 1}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded font-bold hover:bg-slate-50 disabled:opacity-50 transition cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <span className="text-slate-500 font-medium">
+                  Halaman {detailPage} dari {Math.ceil(ledgerData.length / 20)}
+                </span>
+                <button
+                  onClick={() => setDetailPage(prev => Math.min(prev + 1, Math.ceil(ledgerData.length / 20)))}
+                  disabled={detailPage >= Math.ceil(ledgerData.length / 20)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded font-bold hover:bg-slate-50 disabled:opacity-50 transition cursor-pointer"
+                >
+                  Selanjutnya
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -505,11 +645,13 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
             </thead>
             <tbody className="divide-y divide-slate-100">
               {accountBalances.map((item, idx) => (
-                <tr key={`${item.code}-${idx}`} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-6 py-3 border-r border-slate-100 font-mono text-xs font-bold text-slate-700">{item.code}</td>
-                  <td className="px-6 py-3 border-r border-slate-100 text-slate-800 font-medium">{item.name}</td>
+                <tr key={`${item.code}-${idx}`} className={`hover:bg-slate-50 transition-colors ${!item.parentCode ? 'bg-slate-50/70 font-semibold' : ''}`}>
+                  <td className={`px-6 py-3 border-r border-slate-100 font-mono text-xs text-slate-700 ${!item.parentCode ? 'font-bold' : ''}`}>{item.code}</td>
+                  <td className={`px-6 py-3 border-r border-slate-100 text-slate-800 ${!item.parentCode ? 'font-bold text-slate-900' : 'text-slate-600 pl-10 font-normal'}`}>
+                    {!item.parentCode ? item.name : `└─ ${item.name}`}
+                  </td>
                   <td className="px-6 py-3 border-r border-slate-100">
-                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${!item.parentCode ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600'} uppercase`}>
                       {item.type}
                     </span>
                   </td>
@@ -562,18 +704,20 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                 />
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Unit Usaha</label>
-                <select
-                  value={journalUnit}
-                  onChange={e => setJournalUnit(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900"
-                >
-                  {units.map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-              </div>
+              {currentProject !== 'Properti' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Barang & Jasa</label>
+                  <select
+                    value={journalUnit}
+                    onChange={e => setJournalUnit(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900"
+                  >
+                    {units.map(u => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Akun Debet</label>
@@ -584,8 +728,10 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-mono"
                 >
                   <option value="">-- Pilih Akun Debet --</option>
-                  {coasList.map(c => (
-                    <option key={c.code} value={c.code}>[{c.code}] {c.name}</option>
+                  {filteredCoasList.map(c => (
+                    <option key={c.code} value={c.code} className={c.parentCode ? "text-slate-600 pl-4" : "font-bold text-slate-900"}>
+                      {c.parentCode ? `\u00A0\u00A0\u00A0\u00A0└─ [${c.code}] ${c.name}` : `[${c.code}] ${c.name}`}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -599,8 +745,10 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                   className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-mono"
                 >
                   <option value="">-- Pilih Akun Kredit --</option>
-                  {coasList.map(c => (
-                    <option key={c.code} value={c.code}>[{c.code}] {c.name}</option>
+                  {filteredCoasList.map(c => (
+                    <option key={c.code} value={c.code} className={c.parentCode ? "text-slate-600 pl-4" : "font-bold text-slate-900"}>
+                      {c.parentCode ? `\u00A0\u00A0\u00A0\u00A0└─ [${c.code}] ${c.name}` : `[${c.code}] ${c.name}`}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -656,22 +804,22 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                   <tr className="text-[10px] text-slate-400 uppercase tracking-widest">
                     <th className="px-4 py-2 font-bold">Tanggal</th>
                     <th className="px-4 py-2 font-bold">Keterangan</th>
-                    <th className="px-4 py-2 font-bold">Unit</th>
+                    <th className="px-4 py-2 font-bold">Barang & Jasa</th>
                     <th className="px-4 py-2 font-bold">Akun Perkiraan</th>
                     <th className="px-4 py-2 font-bold text-right">Debet</th>
                     <th className="px-4 py-2 font-bold text-right">Kredit</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {manualJournalHistory.length === 0 ? (
+                  {paginatedJournalHistory.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-slate-400 italic">Belum ada riwayat pencatatan jurnal manual.</td>
                     </tr>
                   ) : (
-                    manualJournalHistory.map((row, idx) => (
+                    paginatedJournalHistory.map((row, idx) => (
                       <tr key={`${row.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-2 text-slate-500 whitespace-nowrap">
-                          {row.date ? format(parseISO(row.date), 'dd MMM yyyy') : '-'}
+                          {formatSafeDate(row.date, 'dd MMM yyyy')}
                         </td>
                         <td className="px-4 py-2 text-slate-900 font-medium">{row.description}</td>
                         <td className="px-4 py-2 text-slate-600 font-mono text-[10px] uppercase">{row.unit}</td>
@@ -693,6 +841,27 @@ export default function LedgerPage({ transactions, onRefresh }: { transactions: 
                 </tbody>
               </table>
             </div>
+            {manualJournalHistory.length > 20 && (
+              <div className="flex justify-between items-center p-4 bg-slate-50 border-t border-slate-200 text-xs">
+                <button
+                  onClick={() => setJournalPage(prev => Math.max(prev - 1, 1))}
+                  disabled={journalPage === 1}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded font-bold hover:bg-slate-50 disabled:opacity-50 transition cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <span className="text-slate-500 font-medium">
+                  Halaman {journalPage} dari {Math.ceil(manualJournalHistory.length / 20)}
+                </span>
+                <button
+                  onClick={() => setJournalPage(prev => Math.min(prev + 1, Math.ceil(manualJournalHistory.length / 20)))}
+                  disabled={journalPage >= Math.ceil(manualJournalHistory.length / 20)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded font-bold hover:bg-slate-50 disabled:opacity-50 transition cursor-pointer"
+                >
+                  Selanjutnya
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
