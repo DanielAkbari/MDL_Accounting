@@ -5,7 +5,7 @@ import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config();
 import express from "express";
-import aiRouter from "./ai";
+import aiRouter from "./ai.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
