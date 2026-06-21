@@ -4,13 +4,13 @@ const envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 // Check if credentials are set and not using default placeholders
-const isConfigured = 
-  envUrl && 
+export const isConfigured = 
+  !!(envUrl && 
   envUrl !== '' && 
   envUrl !== 'YOUR_SUPABASE_URL' && 
   envKey && 
   envKey !== '' && 
-  envKey !== 'YOUR_SUPABASE_ANON_KEY';
+  envKey !== 'YOUR_SUPABASE_ANON_KEY');
 
 if (!isConfigured) {
   console.warn(
